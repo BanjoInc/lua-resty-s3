@@ -28,7 +28,7 @@ _M._VERSION = '0.01'
 
 local mt = { __index = _M }
 
-function _M:new(aws_access_key, aws_secret_key, aws_bucket, args)    
+function _M:new(aws_access_key, aws_secret_key, aws_bucket, args)
     if not aws_access_key then
         return nil, "must provide aws_access_key"
     end
@@ -37,6 +37,7 @@ function _M:new(aws_access_key, aws_secret_key, aws_bucket, args)
     end
 
     local host = aws_bucket .. ".s3.amazonaws.com"
+    local default_region = 'us-east-1'
     local timeout = 5
     local aws_region = nil
     if args and type(args) == 'table' then
@@ -50,16 +51,21 @@ function _M:new(aws_access_key, aws_secret_key, aws_bucket, args)
 
     local err = nil
     if not aws_region then
-        aws_region,err = get_bucket_region(aws_access_key, aws_secret_key, aws_bucket, "us-east-1", host, timeout)
+        aws_region,err = get_bucket_region(aws_access_key, aws_secret_key, aws_bucket, default_region, host, timeout)
         if aws_region == nil or aws_region == "" then
             ngx.log(ngx.INFO, "get_bucket_region(", aws_bucket, ") failed! err:", tostring(err))
-            aws_region = "us-east-1"
+            aws_region = default_region
         end
+    end
+    if aws_region == default_region then
+      host = aws_bucket .. "." .. host
+    else
+      host = aws_bucket .. ".s3" .. "-" .. aws_region .. ".amazonaws.com"
     end
 
     local auth = s3_auth:new(aws_access_key, aws_secret_key, aws_bucket, aws_region, nil)
-    host = aws_bucket .. ".s3" .. "-" .. aws_region .. ".amazonaws.com"
-    return setmetatable({ auth=auth, host=host, aws_region=aws_region,timeout=timeout}, mt)
+
+    return setmetatable({ auth=auth, host=host, aws_region=aws_region, timeout=timeout}, mt)
 end
 
 -- http://docs.aws.amazon.com/AmazonS3/latest/API/RESTObjectGET.html
@@ -199,7 +205,7 @@ end
 function _M:list(prefix, delimiter, page_size, marker)
     prefix = prefix or ""
     prefix = proc_uri(prefix)
-    local url = "http://" .. self.host .. "/?prefix=" .. prefix 
+    local url = "http://" .. self.host .. "/?prefix=" .. prefix
     if delimiter then
         url = url .. "&delimiter=" .. delimiter
     end
@@ -247,7 +253,7 @@ end
 function _M:start_multi_upload(key)
     key = proc_uri(key)
     local url = "http://" .. self.host .. "/" .. key .. "?uploads"
-    
+
     local myheaders = util.new_headers()
     local authorization = self.auth:authorization_v4("POST", url, myheaders, nil)
     ngx.log(ngx.INFO, "headers [", cjson.encode(myheaders), "]")
@@ -289,7 +295,7 @@ function get_bucket_location(s3auth, host, timeout)
 
     local myheaders = util.new_headers()
     local authorization = s3auth:authorization_v4("GET", url, myheaders, nil)
-    
+
     -- TODO: check authorization.
     local res, err, req_debug = util.http_get(url, myheaders, timeout)
     if not res then
